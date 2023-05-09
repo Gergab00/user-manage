@@ -34,7 +34,6 @@ $users = DatabaseManage::getAllUsers();
             <thead>
                 <tr>
                     <th>Tabla</th>
-                    <th>Modificar</th>
                     <th>Campos</th>
                 </tr>
             </thead>
@@ -42,7 +41,6 @@ $users = DatabaseManage::getAllUsers();
                 <?php foreach ( $tables as $table ) : ?>
                 <tr>
                     <th scope="row"><?php echo $table['table_name']; ?></th>
-                    <td><input class="regular-text" type="checkbox" name="check_<?php echo $table['table_name'];?>">
                     </td>
                     <td>
                         <select name="<?php echo $table['table_name']; ?>">

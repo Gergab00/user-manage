@@ -38,7 +38,7 @@ class DatabaseManage {
     
             // Actualizar el ID del usuario
             self::modifyUserId( $old_id, $new_id );
-            self::getTablesToUpdate( $old_id, $new_id );
+            self::getTablesToUpdate( $old_id, $new_id, $_POST );
     
             // Redirigir a la página anterior
             wp_redirect( esc_url_raw( $_POST['_wp_http_referer'] ) );
@@ -46,45 +46,199 @@ class DatabaseManage {
         }
     }
 
-    protected static function modifyUserId( $old_id, $new_id ) {
+/**
+ * Actualiza los ID de todos los usuarios dentro del rango especificado.
+ * 
+ * @return void
+ */
+public static function postUpdateAllUsersID(){
+    // Verificar que se reciben los parámetros necesarios por POST
+    if ( isset( $_POST['start_count_ids'] ) && isset( $_POST['range_start'] ) && isset( $_POST['range_end'] )) {
+        // Convertir los parámetros a enteros
+        $strartIDS = intval( $_POST['start_count_ids'] );
+        $rangeStart = intval( $_POST['range_start'] );
+        $rangeEnd = intval( $_POST['range_end'] );
+        $site = intval($_POST['site']);
+        $site = ($site == 1) ? '':$site;
+        
+        // Obtener los usuarios dentro del rango especificado
+        $users = self::getUsersInRange( $rangeStart, $rangeEnd );
+        
+        // Recorrer cada usuario y actualizar su ID
+        foreach( $users as $user ){
+            $old_id = intval( $user->ID );
+            $new_id = $strartIDS++;
+            // Actualizar el ID del usuario
+            self::modifyUserId( $old_id, $new_id, $site );
+
+            self::updateUserAvatarPostmeta($new_id, $site);
+            
+            // Obtener las tablas a actualizar para este usuario
+            // y agregar las consultas SQL necesarias a la cola
+            self::getTablesToUpdate( $old_id, $new_id, $_POST );
+
+        }
+    }
+}
+
+    protected static function modifyUserId( $old_id, $new_id, $site = '') {
         global $wpdb;
+        if (!empty($site)) {
+            $site = $site . '_';
+        }
         $user_table = $wpdb->prefix . 'users';
         $usermeta_table = $wpdb->prefix . 'usermeta';
-     
-        // Modify user ID in wp_users table
-        $wpdb->update( $user_table, array( 'ID' => $new_id ), array( 'ID' => $old_id ) );
-     
-        // Modify user ID in wp_usermeta table
-        $wpdb->update( $usermeta_table, array( 'user_id' => $new_id ), array( 'user_id' => $old_id ) );
-
-        // Modify user ID in wp_posts table
-        $wpdb->update( $wpdb->posts, array( 'post_author' => $new_id ), array( 'post_author' => $old_id ) );
-
-        // Modify user ID in wp_comments table
-        $wpdb->update( $wpdb->comments, array( 'user_id' => $new_id ), array( 'user_id' => $old_id ) );
+        $posts_table = $wpdb->prefix . $site . 'posts';
+        $comments_table = $wpdb->prefix . $site . 'comments';
+        
+        $wpdb->query('START TRANSACTION');
+        
+        try {
+            // Modify user ID in wp_users table
+            $wpdb->query(
+                $wpdb->prepare(
+                    "UPDATE $user_table SET ID = %d WHERE ID = %d",
+                    $new_id,
+                    $old_id
+                )
+            );
+            
+            // Modify user ID in wp_usermeta table
+            $wpdb->query(
+                $wpdb->prepare(
+                    "UPDATE $usermeta_table SET user_id = %d WHERE user_id = %d",
+                    $new_id,
+                    $old_id
+                )
+            );
+            
+            // Modify user ID in wp_posts table
+            $wpdb->query(
+                $wpdb->prepare(
+                    "UPDATE $posts_table SET post_author = %d WHERE post_author = %d",
+                    $new_id,
+                    $old_id
+                )
+            );
+            
+            // Modify user ID in wp_comments table
+            $wpdb->query(
+                $wpdb->prepare(
+                    "UPDATE $comments_table SET user_id = %d WHERE user_id = %d",
+                    $new_id,
+                    $old_id
+                )
+            );
+            
+            $wpdb->query('COMMIT');
+            
+        } catch (Exception $e) {
+            $wpdb->query('ROLLBACK');
+            throw $e;
+        }
     }
-
+    
     public static function getAllUsers(){
         global $wpdb;
         return $wpdb->get_results( "SELECT * FROM $wpdb->users" );
     }
 
-    public static function getTablesToUpdate( $old_id, $new_id ) {
+    public static function getUsersInRange($min_id, $max_id){
         global $wpdb;
-        $post_data = $_POST;
+        $query = $wpdb->prepare(
+            "SELECT * FROM $wpdb->users WHERE ID BETWEEN %d AND %d",
+            $min_id,
+            $max_id
+        );
+        return $wpdb->get_results($query);
+    }
     
-        foreach ( $post_data as $table => $field ) {
-            $showTable = $wpdb->get_var("SHOW TABLES LIKE '$table'");
-            if (!empty($showTable) && $field != 'none') {
-                self::updateUserID( $old_id, $new_id, $table, $field );
+    protected static function getTablesToUpdate( $old_id, $new_id, $post_data ) {
+        global $wpdb;
+        
+        try {
+            $wpdb->query('START TRANSACTION');
+            
+            foreach ( $post_data as $table => $field ) {
+                $showTable = $wpdb->get_var("SHOW TABLES LIKE '$table'");
+                if (!empty($showTable) && $field != 'none') {
+                    self::updateUserID( $old_id, $new_id, $table, $field, $wpdb );
+                }
             }
+            
+            $wpdb->query('COMMIT');
+        } catch (Exception $e) {
+            $wpdb->query('ROLLBACK');
+            throw $e;
         }
     }
     
-
     protected static function updateUserID( $old_id, $new_id, $table, $field ){
         global $wpdb;
-        $wpdb->update( $table, array( $field => $new_id ), array( $field => $old_id ) );
+        $query = $wpdb->prepare(
+            "UPDATE $table SET $field = %d WHERE $field = %d",
+            $new_id,
+            $old_id
+        );
+        $wpdb->query($query);
+    }
+
+    protected static function updateUserAvatarPostmeta($new_id, $site = '') {
+        global $wpdb;
+        if (!empty($site)) {
+            $site = $site . '_';
+        }
+
+        $usermeta_table = $wpdb->prefix . 'usermeta';
+        $postmeta_table = $wpdb->prefix . $site . 'postmeta';
+        $meta_key = $wpdb->prefix . $site . '_user_avatar';
+    
+        $usermeta_query = $wpdb->prepare(
+            "SELECT meta_value FROM $usermeta_table WHERE meta_key LIKE %s",
+            '%' . $meta_key . '%'
+        );
+        $usermeta_results = $wpdb->get_results($usermeta_query);
+    
+        foreach ($usermeta_results as $usermeta_row) {
+            $postmeta_query = $wpdb->prepare(
+                "UPDATE $postmeta_table SET meta_value = %d WHERE post_id IN (SELECT meta_value FROM $usermeta_table WHERE meta_key = %s AND meta_value = %d) AND meta_key = '_wp_attachment_wp_user_avatar'",
+                $new_id,
+                $meta_key,
+                $usermeta_row->meta_value
+            );
+            $wpdb->query($postmeta_query);
+        }
     }
     
+    
 }
+/*
+
+ALTER TABLE oxh_users
+ADD COLUMN spam INT(11) DEFAULT 0 AFTER display_name,
+ADD COLUMN deleted INT(11) DEFAULT 0 AFTER spam;
+INSERT INTO mhi_users SELECT * FROM oxh_users;
+INSERT INTO mhi_usermeta (user_id, meta_key, meta_value)
+SELECT user_id, meta_key, meta_value FROM oxh_usermeta;
+
+UPDATE mhi_usermeta SET meta_key = 'mhi_capabilities' WHERE meta_key = 'oxh_capabilities';
+UPDATE mhi_usermeta SET meta_key = 'mhi_user_level' WHERE meta_key = 'oxh_user_level';
+UPDATE mhi_usermeta SET meta_key = 'mhi_dashboard_quick_press_last_post_id' WHERE meta_key = 'oxh_dashboard_quick_press_last_post_id';
+UPDATE mhi_usermeta SET meta_key = 'mhi_user-settings' WHERE meta_key = 'oxh_user-settings';
+UPDATE mhi_usermeta SET meta_key = 'mhi_user-settings-time' WHERE meta_key = 'oxh_user-settings-time';
+UPDATE mhi_usermeta SET meta_key = 'mhi_ac_preferences_settings' WHERE meta_key = 'oxh_ac_preferences_settings';
+UPDATE mhi_usermeta SET meta_key = 'mhi_ac_preferences_layout_table' WHERE meta_key = 'oxh_ac_preferences_layout_table';
+UPDATE mhi_usermeta SET meta_key = 'mhi_user_avatar' WHERE meta_key = 'oxh_user_avatar';
+UPDATE mhi_usermeta SET meta_key = 'mhi_media_library_mode' WHERE meta_key = 'oxh_media_library_mode';
+UPDATE mhi_usermeta SET meta_key = 'mhi_elementor_connect_common_data' WHERE meta_key = 'oxh_elementor_connect_common_data';
+
+UPDATE mhi_2_postmeta pm
+SET pm.meta_value = (
+  SELECT um.user_id
+  FROM mhi_usermeta um
+  WHERE um.meta_key = 'mhi_2_user_avatar'
+  AND um.meta_value = pm.post_id
+)
+WHERE pm.meta_key = '_wp_attachment_wp_user_avatar';
+
+*/
