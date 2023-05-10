@@ -1,16 +1,24 @@
 <?php
 
-class DatabaseManage {
+/*TODO - 
+DatabaseTables: una clase para obtener todas las tablas de la base de datos y excluir las que no se necesitan.
+DatabaseUser: una clase para actualizar los IDs de usuario y fusionar usuarios.
+DatabaseQuery: una clase para ejecutar consultas SQL en la base de datos.
+*/
 
-    public static function getAllTables() {
+class DatabaseManage
+{
+
+    public static function getAllTables()
+    {
         global $wpdb;
         $exclude_tables = array('commentmeta', 'comments', 'options', 'postmeta', 'post', 'term', 'links');
-        $tables = $wpdb->get_results( 'SHOW TABLES', ARRAY_N );
-        $results = array();
-    
-        foreach ( $tables as $table ) {
+        $tables         = $wpdb->get_results('SHOW TABLES', ARRAY_N);
+        $results        = array();
+
+        foreach ($tables as $table) {
             $table_name = $table[0];
-            $exclude = false;
+            $exclude    = false;
             foreach ($exclude_tables as $excluded) {
                 if (stripos($table_name, $excluded) !== false) {
                     $exclude = true;
@@ -20,79 +28,127 @@ class DatabaseManage {
             if ($exclude || $table_name === $wpdb->users || $table_name === $wpdb->usermeta) {
                 continue; // Saltar a la siguiente tabla si está en la lista de exclusiones o es users o usermeta
             }
-            $fields = $wpdb->get_results( "DESCRIBE $table_name", ARRAY_A );
+            $fields    = $wpdb->get_results("DESCRIBE $table_name", ARRAY_A);
             $results[] = array(
                 'table_name' => $table_name,
-                'fields'     => $fields
+                'fields'     => $fields,
             );
         }
-    
+
         return $results;
     }
-    
-    
-    public static function postUpdateUserID() {
-        if ( isset( $_POST['user_id'] ) && isset( $_POST['new_id'] ) ) {
-            $old_id = intval( $_POST['user_id'] );
-            $new_id = intval( $_POST['new_id'] );
-    
+
+    public static function postUpdateUserID()
+    {
+        if (isset($_POST['user_id']) && isset($_POST['new_id'])) {
+            $old_id = intval($_POST['user_id']);
+            $new_id = intval($_POST['new_id']);
+
             // Actualizar el ID del usuario
-            self::modifyUserId( $old_id, $new_id );
-            self::getTablesToUpdate( $old_id, $new_id, $_POST );
-    
+            self::modifyUserId($old_id, $new_id);
+            self::getTablesToUpdate($old_id, $new_id, $_POST);
+
             // Redirigir a la página anterior
-            wp_redirect( esc_url_raw( $_POST['_wp_http_referer'] ) );
+            wp_redirect(esc_url_raw($_POST['_wp_http_referer']));
             exit;
         }
     }
 
 /**
  * Actualiza los ID de todos los usuarios dentro del rango especificado.
- * 
+ *
  * @return void
  */
-public static function postUpdateAllUsersID(){
-    // Verificar que se reciben los parámetros necesarios por POST
-    if ( isset( $_POST['start_count_ids'] ) && isset( $_POST['range_start'] ) && isset( $_POST['range_end'] )) {
-        // Convertir los parámetros a enteros
-        $strartIDS = intval( $_POST['start_count_ids'] );
-        $rangeStart = intval( $_POST['range_start'] );
-        $rangeEnd = intval( $_POST['range_end'] );
-        $site = intval($_POST['site']);
-        $site = ($site == 1) ? '':$site;
-        
-        // Obtener los usuarios dentro del rango especificado
-        $users = self::getUsersInRange( $rangeStart, $rangeEnd );
-        
-        // Recorrer cada usuario y actualizar su ID
-        foreach( $users as $user ){
-            $old_id = intval( $user->ID );
-            $new_id = $strartIDS++;
-            // Actualizar el ID del usuario
-            self::modifyUserId( $old_id, $new_id, $site );
+    public static function postUpdateAllUsersID()
+    {
+        // Verificar que se reciben los parámetros necesarios por POST
+        if (isset($_POST['start_count_ids']) && isset($_POST['range_start']) && isset($_POST['range_end'])) {
+            // Convertir los parámetros a enteros
+            $strartIDS  = intval($_POST['start_count_ids']);
+            $rangeStart = intval($_POST['range_start']);
+            $rangeEnd   = intval($_POST['range_end']);
+            $site       = intval($_POST['site']);
+            $site       = (1 == $site) ? '' : $site;
 
-            self::updateUserAvatarPostmeta($new_id, $site);
-            
-            // Obtener las tablas a actualizar para este usuario
-            // y agregar las consultas SQL necesarias a la cola
-            self::getTablesToUpdate( $old_id, $new_id, $_POST );
+            // Obtener los usuarios dentro del rango especificado
+            $users = self::getUsersInRange($rangeStart, $rangeEnd);
 
+            // Recorrer cada usuario y actualizar su ID
+            foreach ($users as $user) {
+                $old_id = intval($user->ID);
+                $new_id = $strartIDS++;
+                // Actualizar el ID del usuario
+                self::modifyUserId($old_id, $new_id, $site);
+
+                self::updateUserAvatarPostmeta($new_id, $site);
+
+                // Obtener las tablas a actualizar para este usuario
+                // y agregar las consultas SQL necesarias a la cola
+                self::getTablesToUpdate($old_id, $new_id, $_POST);
+
+            }
         }
     }
-}
 
-    protected static function modifyUserId( $old_id, $new_id, $site = '') {
+    public static function mergeUsers(){
+        if (isset($_POST['action']) && 'manage_duplicate_user' == $_POST['action']){
+            $users = self::obtenerUsuariosDuplicados();
+            $tables = self::getTablesWithUserColumn();
+
+            foreach ($users as $user) {
+                $user = get_object_vars($user);
+                // Accedemos al valor del elemento "user_email"
+                $user_email = $user["user_email"];
+                // Accedemos al valor del elemento "ids"
+                $ids_array = explode(",", $user["ids"]); // Convertir la cadena de ids en un array
+                $new_id = array_shift($ids_array);
+
+                foreach($ids_array as $old_id){
+                    self::modifyUserId($old_id, $new_id);
+
+                    self::updateUserAvatarPostmeta($new_id);
+    
+                    // Obtener las tablas a actualizar para este usuario
+                    // y agregar las consultas SQL necesarias a la cola
+                    self::getTablesToUpdate($old_id, $new_id, $tables);
+                }
+
+            }
+        }
+    }
+
+    protected static function getTablesWithUserColumn() {
+        global $wpdb; // Necesitamos acceder a la instancia global de la base de datos de WordPress
+        
+        $tables = array();
+        
+        // Consulta para obtener todas las tablas que tengan una columna que contenga "user" en su nombre
+        $results = $wpdb->get_results("SELECT DISTINCT TABLE_NAME, COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE COLUMN_NAME LIKE '%user%'");
+        
+        // Almacenar los nombres de tabla en un array
+        foreach ($results as $result) {
+            $tables[$result->TABLE_NAME] = $result->COLUMN_NAME;
+        }
+        
+        return $tables;
+
+    }
+    
+    protected static function modifyUserId($old_id, $new_id, $site = '')
+    {
         global $wpdb;
         if (!empty($site)) {
             $site = $site . '_';
         }
-        $user_table = $wpdb->prefix . 'users';
+        $user_table     = $wpdb->prefix . 'users';
         $usermeta_table = $wpdb->prefix . 'usermeta';
-        $posts_table = $wpdb->prefix . $site . 'posts';
+        $posts_table    = $wpdb->prefix . $site . 'posts';
         $comments_table = $wpdb->prefix . $site . 'comments';
-        
+
         $wpdb->query('START TRANSACTION');
-        
+
         try {
             // Modify user ID in wp_users table
             $wpdb->query(
@@ -102,7 +158,7 @@ public static function postUpdateAllUsersID(){
                     $old_id
                 )
             );
-            
+
             // Modify user ID in wp_usermeta table
             $wpdb->query(
                 $wpdb->prepare(
@@ -111,7 +167,7 @@ public static function postUpdateAllUsersID(){
                     $old_id
                 )
             );
-            
+
             // Modify user ID in wp_posts table
             $wpdb->query(
                 $wpdb->prepare(
@@ -120,7 +176,7 @@ public static function postUpdateAllUsersID(){
                     $old_id
                 )
             );
-            
+
             // Modify user ID in wp_comments table
             $wpdb->query(
                 $wpdb->prepare(
@@ -129,21 +185,23 @@ public static function postUpdateAllUsersID(){
                     $old_id
                 )
             );
-            
+
             $wpdb->query('COMMIT');
-            
+
         } catch (Exception $e) {
             $wpdb->query('ROLLBACK');
             throw $e;
         }
     }
-    
-    public static function getAllUsers(){
+
+    public static function getAllUsers()
+    {
         global $wpdb;
-        return $wpdb->get_results( "SELECT * FROM $wpdb->users" );
+        return $wpdb->get_results("SELECT * FROM $wpdb->users");
     }
 
-    public static function getUsersInRange($min_id, $max_id){
+    public static function getUsersInRange($min_id, $max_id)
+    {
         global $wpdb;
         $query = $wpdb->prepare(
             "SELECT * FROM $wpdb->users WHERE ID BETWEEN %d AND %d",
@@ -152,28 +210,30 @@ public static function postUpdateAllUsersID(){
         );
         return $wpdb->get_results($query);
     }
-    
-    protected static function getTablesToUpdate( $old_id, $new_id, $post_data ) {
+
+    protected static function getTablesToUpdate($old_id, $new_id, $post_data)
+    {
         global $wpdb;
-        
+
         try {
             $wpdb->query('START TRANSACTION');
-            
-            foreach ( $post_data as $table => $field ) {
+
+            foreach ($post_data as $table => $field) {
                 $showTable = $wpdb->get_var("SHOW TABLES LIKE '$table'");
-                if (!empty($showTable) && $field != 'none') {
-                    self::updateUserID( $old_id, $new_id, $table, $field, $wpdb );
+                if (!empty($showTable) && 'none' != $field) {
+                    self::updateUserID($old_id, $new_id, $table, $field, $wpdb);
                 }
             }
-            
+
             $wpdb->query('COMMIT');
         } catch (Exception $e) {
             $wpdb->query('ROLLBACK');
             throw $e;
         }
     }
-    
-    protected static function updateUserID( $old_id, $new_id, $table, $field ){
+
+    protected static function updateUserID($old_id, $new_id, $table, $field)
+    {
         global $wpdb;
         $query = $wpdb->prepare(
             "UPDATE $table SET $field = %d WHERE $field = %d",
@@ -183,7 +243,8 @@ public static function postUpdateAllUsersID(){
         $wpdb->query($query);
     }
 
-    protected static function updateUserAvatarPostmeta($new_id, $site = '') {
+    protected static function updateUserAvatarPostmeta($new_id, $site = '')
+    {
         global $wpdb;
         if (!empty($site)) {
             $site = $site . '_';
@@ -191,14 +252,14 @@ public static function postUpdateAllUsersID(){
 
         $usermeta_table = $wpdb->prefix . 'usermeta';
         $postmeta_table = $wpdb->prefix . $site . 'postmeta';
-        $meta_key = $wpdb->prefix . $site . '_user_avatar';
-    
+        $meta_key       = $wpdb->prefix . $site . '_user_avatar';
+
         $usermeta_query = $wpdb->prepare(
             "SELECT meta_value FROM $usermeta_table WHERE meta_key LIKE %s",
             '%' . $meta_key . '%'
         );
         $usermeta_results = $wpdb->get_results($usermeta_query);
-    
+
         foreach ($usermeta_results as $usermeta_row) {
             $postmeta_query = $wpdb->prepare(
                 "UPDATE $postmeta_table SET meta_value = %d WHERE post_id IN (SELECT meta_value FROM $usermeta_table WHERE meta_key = %s AND meta_value = %d) AND meta_key = '_wp_attachment_wp_user_avatar'",
@@ -209,8 +270,16 @@ public static function postUpdateAllUsersID(){
             $wpdb->query($postmeta_query);
         }
     }
-    
-    
+
+    protected static function obtenerUsuariosDuplicados()
+    {
+        global $wpdb;
+        $user_table     = $wpdb->prefix . 'users';
+        $query = "SELECT `user_email`, GROUP_CONCAT(id) AS ids FROM ".$user_table." GROUP BY `user_email` HAVING COUNT(*) > 1";
+        $usuarios_duplicados = $wpdb->get_results($query);
+        return $usuarios_duplicados;
+    }
+
 }
 /*
 
@@ -234,11 +303,11 @@ UPDATE mhi_usermeta SET meta_key = 'mhi_elementor_connect_common_data' WHERE met
 
 UPDATE mhi_2_postmeta pm
 SET pm.meta_value = (
-  SELECT um.user_id
-  FROM mhi_usermeta um
-  WHERE um.meta_key = 'mhi_2_user_avatar'
-  AND um.meta_value = pm.post_id
+SELECT um.user_id
+FROM mhi_usermeta um
+WHERE um.meta_key = 'mhi_2_user_avatar'
+AND um.meta_value = pm.post_id
 )
 WHERE pm.meta_key = '_wp_attachment_wp_user_avatar';
 
-*/
+ */

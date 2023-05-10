@@ -23,6 +23,7 @@ if ( is_multisite() ) {
 
 add_action( 'admin_post_update_user_id', DatabaseManage::postUpdateUserID() );
 add_action( 'admin_post_update_users_ids', DatabaseManage::postUpdateAllUsersID() );
+add_action( 'admin_post_manage_duplicate_user', DatabaseManage::mergeUsers() );
 
 function update_user_id_admin_init() {
     if ( isset( $_POST['_wpnonce'] ) && wp_verify_nonce( $_POST['_wpnonce'], 'update-user-id' ) ) {

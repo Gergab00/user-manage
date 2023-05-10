@@ -25,6 +25,15 @@ class AdminPages {
             'edit-one-user',
             array($this, 'edit_one_user_admin_page' )
         );
+
+        add_submenu_page(
+            'user-manage',
+            'User Options',
+            'Manage Duplicate Users',
+            'manage_options',
+            'manage-duplicate-user',
+            array($this, 'manage_duplicate_user_admin_page' )
+        );
     }
 
     function user_manage_admin_page() {
@@ -38,6 +47,12 @@ class AdminPages {
         $tables = $this->tables;
         ob_start();
         include( USER_MANAGER_PLUGIN_DIR . '/admin/views/edit-one-user.php' );
+        echo ob_get_clean();
+    }
+
+    function manage_duplicate_user_admin_page() {
+        ob_start();
+        include( USER_MANAGER_PLUGIN_DIR . '/admin/views/manage-duplicate-user.php' );
         echo ob_get_clean();
     }
 }
