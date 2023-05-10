@@ -111,6 +111,8 @@ class DatabaseManage
                     // Obtener las tablas a actualizar para este usuario
                     // y agregar las consultas SQL necesarias a la cola
                     self::getTablesToUpdate($old_id, $new_id, $tables);
+
+                    wp_delete_user($old_id,$new_id);
                 }
 
             }
